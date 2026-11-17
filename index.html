@@ -373,7 +373,10 @@ function photoHtml(id){
   const ps=camPh(id),left=MAX_PH-ps.length;
   return `<div style="font-size:12px;color:var(--mut)">${ps.length} / ${MAX_PH} photos</div>
   <div class="pgrid">${ps.map(p=>`<div class="ph"><a href="${esc(p.view)}" target="_blank" rel="noopener"><img loading="lazy" src="${esc(thumb(p))}" alt="photo"></a><button class="pdel" title="Delete" onclick="delPhoto('${p.pid}','${id}')">✕</button></div>`).join("")}</div>
-  <label class="pbtn ${left?"":"off"}">📷 ${left?"Add Photos":"Maximum 10 photos"}<input type="file" accept="image/*" multiple hidden onchange="addPhotos(this,'${id}')"></label>`;
+  ${left?`<div style="display:flex;gap:8px;flex-wrap:wrap">
+    <label class="pbtn">📷 Take Photo<input type="file" accept="image/*" capture="environment" hidden onchange="addPhotos(this,'${id}')"></label>
+    <label class="pbtn">🖼 From Gallery<input type="file" accept="image/*" multiple hidden onchange="addPhotos(this,'${id}')"></label>
+  </div>`:`<div class="pbtn off">Maximum ${MAX_PH} photos uploaded</div>`}`;
 }
 function rePh(id){const e=$("p_"+id);if(e)e.innerHTML=photoHtml(id)}
 function phMsg(id,t,err,ok){const m=$("pm_"+id);if(m){m.textContent=t;m.className="msg"+(err?" err":ok?" ok":"")}}
