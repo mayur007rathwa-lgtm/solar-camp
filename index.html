@@ -287,8 +287,8 @@ function calc(id){
   $("k_"+id).innerHTML=`<span>Total Registration: <b>${reg}</b></span><span>Pending: <b>${pend}</b></span><span>Achievement: <b>${ach}</b></span>`;
   const w=[];
   if(r.village){const ag=[1,2,3].filter(k=>r[`a${k}_name`]).length;if(ag<3)w.push(`Only ${ag} agency entered (minimum 3 required).`)}
-  if(n(r.vendor)>reg)w.push("Vendor Selection is more than Registration.");
-  if(n(r.install)>n(r.vendor))w.push("Installation is more than Vendor Selection.");
+  if(n(r.vendor)>reg)w.push("Note: Vendor Selection is more than today's Registration (allowed, if earlier registrations are included).");
+  if(n(r.install)>n(r.vendor))w.push("Note: Installation is more than today's Vendor Selection (allowed, if earlier cases are included).");
   ["je_mobile","a1_mobile","a2_mobile","a3_mobile"].forEach(f=>{const e=document.querySelector(`[data-id="${id}"][data-f="${f}"]`);if(e)e.classList.toggle("bad",!!r[f]&&r[f].length!==10)});
   $("w_"+id).textContent=w.join("  ");
 }
@@ -304,8 +304,6 @@ async function saveAll(){
   const goTo=r=>{if(isAdm())$("admSdn").value=r.sdn;pickDate(r.date)};
   const bad=chk.filter(r=>["je_mobile","a1_mobile","a2_mobile","a3_mobile"].some(f=>r[f]&&r[f].length!==10));
   if(bad.length){setMsg(`Mobile No. must be 10 digits (check ${bad[0].sdn} ${dmy(bad[0].date)}).`,true);goTo(bad[0]);return}
-  const bad2=chk.find(r=>n(r.vendor)>n(r.reg_upto)+n(r.reg_above)||n(r.install)>n(r.vendor));
-  if(bad2){setMsg(`Check figures on ${bad2.sdn} ${dmy(bad2.date)}: Vendor/Installation is more than previous stage.`,true);goTo(bad2);return}
   if(isAdm()&&!S.changed.size&&!S.deleted.size){setMsg("No changes to save.");return}
   $("saveBtn").disabled=true;setMsg("Saving...");
   try{
