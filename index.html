@@ -66,6 +66,14 @@ tr.tot td{background:var(--g);font-weight:bold}
 .filters select{width:auto}
 .hide{display:none!important}
 .warn{color:#8a6d00;font-size:12px;margin-top:4px}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px;margin-top:6px}
+.ph{position:relative}
+.ph img{width:100%;height:84px;object-fit:cover;border-radius:6px;border:1px solid var(--bd);display:block;background:#eef2f7}
+.pdel{position:absolute;top:3px;right:3px;background:rgba(0,0,0,.65);color:#fff;border-radius:50%;width:24px;height:24px;padding:0;font-size:13px;line-height:24px}
+.pbtn{display:inline-block;margin-top:8px;padding:9px 14px;border:1px dashed var(--b2);border-radius:6px;color:var(--b);cursor:pointer;background:#f5f9ff;font-size:13px}
+.pbtn.off{opacity:.5;pointer-events:none}
+.pcard{margin-bottom:10px}
+.pcard h4{margin:0 0 4px;font-size:13px;color:var(--b)}
 </style>
 </head>
 <body>
@@ -121,6 +129,7 @@ tr.tot td{background:var(--g);font-weight:bold}
       <button class="tab on" data-t="sum" onclick="dTab(this)">Summary</button>
       <button class="tab" data-t="status" onclick="dTab(this)">Entry Status</button>
       <button class="tab" data-t="all" onclick="dTab(this)">All Entries</button>
+      <button class="tab" data-t="photos" onclick="dTab(this)">📷 Photos</button>
       <button class="tab" data-t="edit" onclick="dTab(this)">✏ Edit Entries</button>
       <button onclick="downloadXlsx()">⬇ Download Excel</button>
     </div>
@@ -132,6 +141,13 @@ tr.tot td{background:var(--g);font-weight:bold}
         <select id="fDate" onchange="renderAll()"><option value="">All Dates</option></select>
       </div>
       <div class="tbl" id="allTbl"></div>
+    </div>
+    <div id="d_photos" class="hide">
+      <div class="filters">
+        <select id="pSdn" onchange="renderPhotos()"><option value="">All SDN</option></select>
+        <select id="pDate" onchange="renderPhotos()"><option value="">All Dates</option></select>
+      </div>
+      <div id="phList"></div>
     </div>
   </div>
 </div>
@@ -167,7 +183,8 @@ const COLS=[["date","Date"],["sdn","SDN"],["village","Village / Location"],["ven
 ["target","Target Registration (Minimum)"],["reg_upto","Registration Done (Nos.) Up to 2.18 KW"],["reg_above","Registration Done (Nos.) Above 2.18 KW"],
 ["vendor","Vendor Selection Done (Nos.)"],["install","No. of Installation (Nos.)"]];
 
-let S={login:null,pin:null,role:null,rows:[],date:DATES[0],dirty:false,changed:new Set(),deleted:new Set()};
+const MAX_PH=10;
+let S={photos:[],serverIds:new Set(),login:null,pin:null,role:null,rows:[],date:DATES[0],dirty:false,changed:new Set(),deleted:new Set()};
 const isAdm=()=>S.role==="ADMIN";
 const curSdn=()=>isAdm()?$("admSdn").value:S.login;
 const myRows=()=>S.rows.filter(r=>r.sdn===curSdn());
@@ -191,6 +208,14 @@ function demoApi(b){
   const role=b.login==="Division"?"ADMIN":"SDN";
   if(b.action==="login") return {ok:true,role,login:b.login};
   if(b.action==="list") return {ok:true,rows:role==="ADMIN"?all:all.filter(r=>r.sdn===b.login)};
+  let ph=JSON.parse(localStorage.getItem("solarDemoPh")||"[]");
+  if(b.action==="photos") return {ok:true,photos:role==="ADMIN"?ph:ph.filter(p=>p.sdn===b.login)};
+  if(b.action==="upload"){
+    if(ph.filter(p=>p.entry_id===b.entryId).length>=MAX_PH) return {ok:false,error:`Maximum ${MAX_PH} photos allowed for one camp`};
+    const p={pid:"P"+Date.now()+Math.random().toString().slice(2,6),entry_id:b.entryId,date:b.date,sdn:b.sdn,village:b.village,file_id:"",thumb:"data:image/jpeg;base64,"+b.data,view:"",at:new Date().toLocaleString("en-IN"),by:b.login};
+    p.view=p.thumb;ph.push(p);localStorage.setItem("solarDemoPh",JSON.stringify(ph));return {ok:true,photo:p};
+  }
+  if(b.action==="delphoto"){localStorage.setItem("solarDemoPh",JSON.stringify(ph.filter(p=>p.pid!==b.pid)));return {ok:true}}
   if(b.action==="save"){
     const at=new Date().toLocaleString("en-IN");
     const up=b.rows.map(r=>({...r,updated_at:at,updated_by:b.login}));
@@ -231,7 +256,8 @@ async function loadSdn(){
   setMsg("Loading...");
   const r=await api({action:"list",login:S.login,pin:S.pin});
   if(!r.ok){setMsg(r.error,true);return}
-  S.rows=r.rows;if(!S.rows.length)DATES.forEach(d=>S.rows.push(blank(d,S.login,1)));
+  S.rows=r.rows;S.serverIds=new Set(r.rows.map(x=>x.id));if(!S.rows.length)DATES.forEach(d=>S.rows.push(blank(d,S.login,1)));
+  await loadPhotos();
   const today=new Date().toISOString().slice(0,10);
   if(!S.loaded&&DATES.includes(today))S.date=today;S.loaded=true;
   setMsg("");renderSdn();
@@ -282,6 +308,9 @@ function campHtml(r,i){
   <div><label>Vendor Selection Done</label>${inp(r,"vendor")}</div><div><label>No. of Installation</label>${inp(r,"install")}</div></div>
   <div><label>Remarks</label>${inp(r,"remarks")}</div>
   <div class="calc" id="k_${r.id}"></div><div class="warn" id="w_${r.id}"></div>
+  <div class="sec-t">Camp Photos</div>
+  <div id="p_${r.id}">${photoHtml(r.id)}</div>
+  <div id="pm_${r.id}" class="msg" style="margin-top:4px"></div>
   </div>`;
 }
 function edit(el){
@@ -307,7 +336,8 @@ function addCamp(){
   const nr=blank(S.date,curSdn(),k);S.rows.push(nr);S.changed.add(nr.id);S.dirty=true;setMsg("Unsaved changes");renderSdn();
   setTimeout(()=>window.scrollTo(0,document.body.scrollHeight),50);
 }
-function delCamp(id){if(!confirm("Remove this camp?"))return;S.rows=S.rows.filter(r=>r.id!==id);S.changed.delete(id);S.deleted.add(id);S.dirty=true;setMsg("Unsaved changes");renderSdn()}
+function delCamp(id){const np=camPh(id).length;if(!confirm(np?`Remove this camp? Its ${np} photo(s) must be deleted first.`:"Remove this camp?"))return;
+  if(np){alert("Please delete the photos of this camp first.");return}S.rows=S.rows.filter(r=>r.id!==id);S.changed.delete(id);S.deleted.add(id);S.dirty=true;setMsg("Unsaved changes");renderSdn()}
 async function saveAll(){
   const chk=isAdm()?S.rows.filter(r=>S.changed.has(r.id)):S.rows;
   const goTo=r=>{if(isAdm())$("admSdn").value=r.sdn;pickDate(r.date)};
@@ -319,7 +349,7 @@ async function saveAll(){
     const body={action:"save",login:S.login,pin:S.pin,rows:isAdm()?S.rows.filter(r=>S.changed.has(r.id)):S.rows};
     if(isAdm())body.deleted=[...S.deleted];
     const r=await api(body);
-    if(r.ok){S.dirty=false;S.changed.clear();S.deleted.clear();setMsg(`Saved successfully (${r.at})`,false,true);
+    if(r.ok){body.rows.forEach(x=>S.serverIds.add(x.id));S.dirty=false;S.changed.clear();S.deleted.clear();setMsg(`Saved successfully (${r.at})`,false,true);
       if(isAdm())await loadAll(true);else renderSdn()}else setMsg(r.error,true);
   }catch(e){setMsg("Network error – data not saved. Try again.",true)}
   $("saveBtn").disabled=false;
@@ -333,13 +363,78 @@ async function refreshNow(){
 function setMsg(t,err,ok){const m=$("saveMsg");m.textContent=t;m.className="msg"+(err?" err":ok?" ok":"")}
 window.addEventListener("beforeunload",e=>{if(S.dirty){e.preventDefault();e.returnValue=""}});
 
+/* ---------- PHOTOS ---------- */
+async function loadPhotos(){
+  try{const r=await api({action:"photos",login:S.login,pin:S.pin});S.photos=r.ok?r.photos:[]}catch(e){S.photos=[]}
+}
+const thumb=p=>p.thumb||`https://drive.google.com/thumbnail?id=${p.file_id}&sz=w400`;
+const camPh=id=>S.photos.filter(p=>p.entry_id===id);
+function photoHtml(id){
+  const ps=camPh(id),left=MAX_PH-ps.length;
+  return `<div style="font-size:12px;color:var(--mut)">${ps.length} / ${MAX_PH} photos</div>
+  <div class="pgrid">${ps.map(p=>`<div class="ph"><a href="${esc(p.view)}" target="_blank" rel="noopener"><img loading="lazy" src="${esc(thumb(p))}" alt="photo"></a><button class="pdel" title="Delete" onclick="delPhoto('${p.pid}','${id}')">✕</button></div>`).join("")}</div>
+  <label class="pbtn ${left?"":"off"}">📷 ${left?"Add Photos":"Maximum 10 photos"}<input type="file" accept="image/*" multiple hidden onchange="addPhotos(this,'${id}')"></label>`;
+}
+function rePh(id){const e=$("p_"+id);if(e)e.innerHTML=photoHtml(id)}
+function phMsg(id,t,err,ok){const m=$("pm_"+id);if(m){m.textContent=t;m.className="msg"+(err?" err":ok?" ok":"")}}
+function compress(file){
+  return new Promise((res,rej)=>{
+    const url=URL.createObjectURL(file),img=new Image();
+    img.onload=()=>{const M=1280;let w=img.naturalWidth,h=img.naturalHeight;const k=Math.min(1,M/Math.max(w,h));w=Math.round(w*k);h=Math.round(h*k);
+      const c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(img,0,0,w,h);URL.revokeObjectURL(url);
+      res(c.toDataURL("image/jpeg",0.7).split(",")[1])};
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error("Not an image"))};img.src=url;
+  });
+}
+async function addPhotos(inp,id){
+  const files=[...inp.files];inp.value="";
+  const r=S.rows.find(x=>x.id===id);if(!r||!files.length)return;
+  if(!S.serverIds.has(id)){phMsg(id,"Please Save this camp first, then upload photos.",true);return}
+  if(!r.village){phMsg(id,"Enter Village name and Save first, then upload photos.",true);return}
+  const left=MAX_PH-camPh(id).length;
+  if(left<=0){phMsg(id,`Maximum ${MAX_PH} photos allowed.`,true);return}
+  const list=files.slice(0,left);let ok=0;
+  for(let i=0;i<list.length;i++){
+    phMsg(id,`Uploading ${i+1} / ${list.length}...`);
+    try{
+      const data=await compress(list[i]);
+      const res=await api({action:"upload",login:S.login,pin:S.pin,entryId:id,date:r.date,sdn:r.sdn,village:r.village,data});
+      if(res.ok){S.photos.push(res.photo);ok++;rePh(id)}else{phMsg(id,res.error,true);return}
+    }catch(e){phMsg(id,`Photo ${i+1}: upload failed (${e.message||"network"}).`,true);return}
+  }
+  phMsg(id,`${ok} photo uploaded successfully.`+(files.length>list.length?` Only ${MAX_PH} photos allowed – ${files.length-list.length} skipped.`:""),false,true);
+  if(isAdm()){renderStatus();renderPhotos()}
+}
+async function delPhoto(pid,id){
+  if(!confirm("Delete this photo?"))return;
+  phMsg(id,"Deleting...");
+  try{const r=await api({action:"delphoto",login:S.login,pin:S.pin,pid});
+    if(r.ok){S.photos=S.photos.filter(p=>p.pid!==pid);rePh(id);phMsg(id,"Photo deleted.",false,true);if(isAdm()){renderStatus();renderPhotos()}}
+    else phMsg(id,r.error,true)}catch(e){phMsg(id,"Network error.",true)}
+}
+function renderPhotos(){
+  if(!$("phList"))return;
+  const fs=$("pSdn").value,fd=$("pDate").value;
+  const ps=S.photos.filter(p=>(!fs||p.sdn===fs)&&(!fd||p.date===fd));
+  const g={};ps.forEach(p=>{(g[p.entry_id]=g[p.entry_id]||[]).push(p)});
+  const keys=Object.keys(g).sort((a,b)=>{const x=g[a][0],y=g[b][0];return (x.date+SDNS.indexOf(x.sdn)+a).localeCompare(y.date+SDNS.indexOf(y.sdn)+b)});
+  $("phList").innerHTML=keys.length?`<p style="font-size:12px;color:var(--mut)">${ps.length} photos</p>`+keys.map(k=>{const p0=g[k][0],row=S.rows.find(r=>r.id===k);
+    return `<div class="card pcard"><h4>${dmy(p0.date)} · ${esc(p0.sdn)} · ${esc((row&&row.village)||p0.village||"-")} (${g[k].length})</h4>
+    <div class="pgrid">${g[k].map(p=>`<div class="ph"><a href="${esc(p.view)}" target="_blank" rel="noopener"><img loading="lazy" src="${esc(thumb(p))}" alt="photo"></a></div>`).join("")}</div></div>`}).join("")
+    :`<div class="card">No photos uploaded${fs||fd?" for this selection":""}.</div>`;
+}
+
 /* ---------- DIVISION ---------- */
 async function loadAll(keep){
   if(!keep&&S.dirty&&!confirm("Unsaved changes will be lost. Refresh?"))return;
   if(!keep)$("d_sum").innerHTML="<p>Loading...</p>";
   const r=await api({action:"list",login:S.login,pin:S.pin});
   if(!r.ok){$("d_sum").innerHTML=`<p class="no">${esc(r.error)}</p>`;return}
-  S.rows=r.rows;S.dirty=false;S.changed.clear();S.deleted.clear();
+  S.rows=r.rows;S.serverIds=new Set(r.rows.map(x=>x.id));S.dirty=false;S.changed.clear();S.deleted.clear();
+  await loadPhotos();
+  if(!$("pSdn").options.length||$("pSdn").options.length<2){$("pSdn").innerHTML='<option value="">All SDN</option>'+SDNS.map(x=>`<option>${x}</option>`).join("");
+    $("pDate").innerHTML='<option value="">All Dates</option>'+DATES.map(d=>`<option value="${d}">${dmy(d)}</option>`).join("");}
+  renderPhotos();
   if(!$("admSdn").options.length)$("admSdn").innerHTML=SDNS.map(s=>`<option>${s}</option>`).join("");
   const fs=$("fSdn").value,fd=$("fDate").value;
   $("fSdn").innerHTML='<option value="">All SDN</option>'+SDNS.map(s=>`<option>${s}</option>`).join("");
@@ -353,7 +448,7 @@ function dTab(b){
   if(!ed&&S.dirty&&!confirm("Unsaved changes will be lost. Continue?"))return;
   if(!ed&&S.dirty){loadAll(true)}
   document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===b));
-  ["sum","status","all"].forEach(x=>$("d_"+x).classList.toggle("hide",x!==t));
+  ["sum","status","all","photos"].forEach(x=>$("d_"+x).classList.toggle("hide",x!==t));
   $("sdnView").classList.toggle("hide",!ed);$("admBar").classList.toggle("hide",!ed);$("saveBar").classList.toggle("hide",!ed);
   if(ed){setMsg("");renderSdn()}
 }
@@ -377,7 +472,9 @@ function renderSum(){
 function renderStatus(){
   const last={};S.rows.forEach(r=>{if(r.updated_at)last[r.sdn]=r.updated_at});
   $("d_status").innerHTML=`<div class="card"><b style="color:var(--b)">Village entry status (✓ = village entered, ✗ = pending)</b><div class="tbl" style="margin-top:8px"><table><tr><th>SDN</th>${DATES.map(d=>`<th>${dmy(d).slice(0,5)}</th>`).join("")}<th>Last Updated</th></tr>
-  ${SDNS.map(s=>`<tr><td class="l">${s}</td>${DATES.map(d=>{const c=S.rows.filter(r=>r.sdn===s&&r.date===d&&r.village).length;return `<td class="${c?"ok":"no"}">${c?"✓"+(c>1?" "+c:""):"✗"}</td>`}).join("")}<td>${esc(last[s]||"-")}</td></tr>`).join("")}</table></div></div>`;
+  ${SDNS.map(s=>`<tr><td class="l">${s}</td>${DATES.map(d=>{const c=S.rows.filter(r=>r.sdn===s&&r.date===d&&r.village).length;return `<td class="${c?"ok":"no"}">${c?"✓"+(c>1?" "+c:""):"✗"}</td>`}).join("")}<td>${esc(last[s]||"-")}</td></tr>`).join("")}</table></div></div>
+  <div class="card"><b style="color:var(--b)">Photo upload status (No. of photos)</b><div class="tbl" style="margin-top:8px"><table><tr><th>SDN</th>${DATES.map(d=>`<th>${dmy(d).slice(0,5)}</th>`).join("")}<th>Total</th></tr>
+  ${SDNS.map(s=>{const t=S.photos.filter(p=>p.sdn===s).length;return `<tr><td class="l">${s}</td>${DATES.map(d=>{const c=S.photos.filter(p=>p.sdn===s&&p.date===d).length;return `<td class="${c?"ok":"no"}">${c||"✗"}</td>`}).join("")}<td><b>${t}</b></td></tr>`}).join("")}</table></div></div>`;
 }
 function renderAll(){
   const fs=$("fSdn").value,fd=$("fDate").value;
@@ -387,10 +484,10 @@ function renderAll(){
 }
 function downloadXlsx(){
   if(typeof XLSX==="undefined"){alert("Excel library not loaded. Check internet.");return}
-  const H=["Sr. No.","Date","Day",...COLS.slice(1).map(c=>c[1]),"Registration Pending (Nos.)","Achievement %","Remarks","Last Updated"];
+  const H=["Sr. No.","Date","Day",...COLS.slice(1).map(c=>c[1]),"Registration Pending (Nos.)","Achievement %","Remarks","Photos (Nos.)","Last Updated"];
   const data=[["MADHYA GUJARAT VIJ COMPANY LIMITED – BODELI DIVISION"],["PM Surya Ghar: Muft Bijli Yojana – Solar Registration & Vendor Selection Camp Planning (18-11-2026 to 30-11-2026)"],[],H];
   S.rows.forEach((r,i)=>{const reg=n(r.reg_upto)+n(r.reg_above);
-    data.push([i+1,dmy(r.date),dayName(r.date),...COLS.slice(1).map(([f])=>NUM.includes(f)?(r[f]===""?"":n(r[f])):r[f]),r.target===""?"":n(r.target)-reg,n(r.target)?+(reg/n(r.target)).toFixed(3):"",r.remarks,r.updated_at])});
+    data.push([i+1,dmy(r.date),dayName(r.date),...COLS.slice(1).map(([f])=>NUM.includes(f)?(r[f]===""?"":n(r[f])):r[f]),r.target===""?"":n(r.target)-reg,n(r.target)?+(reg/n(r.target)).toFixed(3):"",r.remarks,S.photos.filter(p=>p.entry_id===r.id).length,r.updated_at])});
   const ws=XLSX.utils.aoa_to_sheet(data);ws["!cols"]=H.map((h,i)=>({wch:i<3?11:Math.min(Math.max(h.length,12),24)}));
   ws["!merges"]=[{s:{r:0,c:0},e:{r:0,c:H.length-1}},{s:{r:1,c:0},e:{r:1,c:H.length-1}}];
   const S1=[["SDN-wise Summary"],["Sr. No.","SDN",...SUMH]],a=agg("sdn",SDNS);

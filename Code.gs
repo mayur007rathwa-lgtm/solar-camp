@@ -80,6 +80,9 @@ function doPost(ev) {
     if (req.action === 'login') return out({ ok: true, role: user.role, login: user.login });
     if (req.action === 'list') return out({ ok: true, rows: readRows(user.role === 'ADMIN' ? null : user.login) });
     if (req.action === 'save') return out(saveRows(user, req.rows || [], req.deleted || []));
+    if (req.action === 'photos') return out({ ok: true, photos: listPhotos(user.role === 'ADMIN' ? null : user.login) });
+    if (req.action === 'upload') return out(uploadPhoto(user, req));
+    if (req.action === 'delphoto') return out(deletePhoto(user, req.pid));
     return out({ ok: false, error: 'Unknown action' });
   } catch (err) {
     return out({ ok: false, error: String(err) });
@@ -157,4 +160,93 @@ function toArr(r, now, by) {
 
 function out(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ---------- PHOTOS (Google Drive) ---------- */
+var MAX_PHOTOS = 10;
+var PH_HEAD = ['Photo ID', 'Entry ID', 'Date', 'SDN', 'Village', 'File ID', 'File Link', 'Uploaded At', 'Uploaded By'];
+
+/* Run this once from the editor after pasting the new code, to give Drive permission */
+function authorizeDrive() {
+  rootFolder();
+  photoSheet();
+  Logger.log('Drive permission OK. Photo folder: ' + rootFolder().getUrl());
+}
+
+function photoSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('Photos');
+  if (!sh) {
+    sh = ss.insertSheet('Photos');
+    sh.getRange(1, 1, 1, PH_HEAD.length).setValues([PH_HEAD])
+      .setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function rootFolder() {
+  var p = PropertiesService.getScriptProperties();
+  var id = p.getProperty('PHOTO_ROOT');
+  if (id) { try { return DriveApp.getFolderById(id); } catch (e) {} }
+  var f = DriveApp.createFolder('Solar Camp Photos - Bodeli Division (18-30 Nov 2026)');
+  p.setProperty('PHOTO_ROOT', f.getId());
+  return f;
+}
+
+function subFolder(parent, name) {
+  var it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+
+function listPhotos(sdn) {
+  var v = photoSheet().getDataRange().getDisplayValues(), res = [];
+  for (var i = 1; i < v.length; i++) {
+    if (!v[i][0]) continue;
+    if (sdn && v[i][3] !== sdn) continue;
+    res.push({ pid: v[i][0], entry_id: v[i][1], date: v[i][2], sdn: v[i][3], village: v[i][4],
+      file_id: v[i][5], view: v[i][6], at: v[i][7], by: v[i][8] });
+  }
+  return res;
+}
+
+function uploadPhoto(user, req) {
+  var admin = user.role === 'ADMIN';
+  if (!admin && req.sdn !== user.login) return { ok: false, error: 'You can upload only ' + user.login + ' SDN photos' };
+  if (SDNS.indexOf(req.sdn) < 0) return { ok: false, error: 'Invalid SDN' };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date || '')) return { ok: false, error: 'Invalid date' };
+  if (!req.data) return { ok: false, error: 'No photo data' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var have = listPhotos(req.sdn).filter(function (p) { return p.entry_id === req.entryId; }).length;
+    if (have >= MAX_PHOTOS) return { ok: false, error: 'Maximum ' + MAX_PHOTOS + ' photos allowed for one camp' };
+    var dmy = req.date.split('-').reverse().join('-');
+    var folder = subFolder(subFolder(rootFolder(), dmy), req.sdn);
+    var now = new Date();
+    var stamp = Utilities.formatDate(now, 'Asia/Kolkata', 'dd-MM-yyyy HH:mm');
+    var name = dmy + '_' + req.sdn + '_' + (req.village || 'Camp').replace(/[^A-Za-z0-9 ]/g, '').trim().replace(/ +/g, '-') +
+      '_' + Utilities.formatDate(now, 'Asia/Kolkata', 'HHmmss') + '.jpg';
+    var blob = Utilities.newBlob(Utilities.base64Decode(req.data), 'image/jpeg', name);
+    var file = folder.createFile(blob);
+    try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
+    var rec = { pid: 'P' + now.getTime() + Math.floor(Math.random() * 1000), entry_id: req.entryId, date: req.date,
+      sdn: req.sdn, village: req.village || '', file_id: file.getId(), view: file.getUrl(), at: stamp, by: user.login };
+    photoSheet().appendRow([rec.pid, rec.entry_id, rec.date, rec.sdn, rec.village, rec.file_id, rec.view, rec.at, rec.by]);
+    return { ok: true, photo: rec };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function deletePhoto(user, pid) {
+  var sh = photoSheet(), v = sh.getDataRange().getDisplayValues();
+  for (var i = 1; i < v.length; i++) {
+    if (v[i][0] !== pid) continue;
+    if (user.role !== 'ADMIN' && v[i][3] !== user.login) return { ok: false, error: 'Not allowed' };
+    try { DriveApp.getFileById(v[i][5]).setTrashed(true); } catch (e) {}
+    sh.deleteRow(i + 1);
+    return { ok: true };
+  }
+  return { ok: false, error: 'Photo not found' };
 }
