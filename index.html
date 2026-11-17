@@ -24,6 +24,11 @@ button{font:inherit;border:0;border-radius:6px;padding:9px 14px;cursor:pointer;b
 button.sec{background:#fff;color:var(--b);border:1px solid var(--b2)}
 button.danger{background:#fff;color:var(--r);border:1px solid var(--r)}
 button:disabled{opacity:.5}
+.stbar{display:flex;align-items:center;gap:8px;margin-top:10px;padding:6px 6px 6px 12px;border:1px solid rgba(255,255,255,.25);border-radius:10px;background:rgba(255,255,255,.06)}
+.stbar .dot{width:10px;height:10px;border-radius:50%;background:#22c55e;flex:0 0 auto}
+.stbar .sttxt{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hbtn{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.55);padding:7px 12px;font-size:13px;border-radius:8px}
+.hbtn.w{background:#fff;color:var(--b);border-color:#fff;font-weight:bold}
 .btnlink{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.6);padding:5px 10px;font-size:12px}
 .login{max-width:360px;margin:40px auto}
 .chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
@@ -65,12 +70,14 @@ tr.tot td{background:var(--g);font-weight:bold}
 </head>
 <body>
 <header>
-  <div class="hbar">
-    <div>
-      <h1>MGVCL – Bodeli Division</h1>
-      <p>PM Surya Ghar: Solar Registration &amp; Vendor Selection Camp Planning (18-11-2026 to 30-11-2026)</p>
-    </div>
-    <button id="logoutBtn" class="btnlink hide" onclick="logout()">Logout</button>
+  <div>
+    <h1>MGVCL – Bodeli Division</h1>
+    <p>PM Surya Ghar: Solar Registration &amp; Vendor Selection Camp Planning (18-11-2026 to 30-11-2026)</p>
+  </div>
+  <div id="stBar" class="stbar hide">
+    <span class="dot"></span><span id="stTxt" class="sttxt"></span>
+    <button class="hbtn" onclick="refreshNow()">⟳ Refresh</button>
+    <button class="hbtn w" onclick="logout()">Logout</button>
   </div>
 </header>
 
@@ -116,7 +123,6 @@ tr.tot td{background:var(--g);font-weight:bold}
       <button class="tab" data-t="all" onclick="dTab(this)">All Entries</button>
       <button class="tab" data-t="edit" onclick="dTab(this)">✏ Edit Entries</button>
       <button onclick="downloadXlsx()">⬇ Download Excel</button>
-      <button class="sec" onclick="loadAll()">⟳ Refresh</button>
     </div>
     <div id="d_sum"></div>
     <div id="d_status" class="hide"></div>
@@ -213,7 +219,7 @@ function logout(){
   sessionStorage.removeItem("solarLogin");location.reload();
 }
 async function start(){
-  $("loginView").classList.add("hide");$("logoutBtn").classList.remove("hide");
+  $("loginView").classList.add("hide");$("stBar").classList.remove("hide");
   if(S.role==="ADMIN"){$("divView").appendChild($("sdnView"));$("divView").classList.remove("hide");await loadAll();}
   else{$("sdnView").classList.remove("hide");$("saveBar").classList.remove("hide");await loadSdn();}
 }
@@ -225,13 +231,14 @@ async function loadSdn(){
   if(!r.ok){setMsg(r.error,true);return}
   S.rows=r.rows;if(!S.rows.length)DATES.forEach(d=>S.rows.push(blank(d,S.login,1)));
   const today=new Date().toISOString().slice(0,10);
-  if(DATES.includes(today))S.date=today;
+  if(!S.loaded&&DATES.includes(today))S.date=today;S.loaded=true;
   setMsg("");renderSdn();
 }
 function renderSdn(){
   // KPIs
   const t=myRows().reduce((a,r)=>{NUM.forEach(f=>a[f]+=n(r[f]));if(r.village)a.v++;return a},{target:0,reg_upto:0,reg_above:0,vendor:0,install:0,v:0});
   const reg=t.reg_upto+t.reg_above;
+  if(!isAdm())setSt(`${S.login} · ${myRows().filter(r=>r.village).length} villages planned`);
   $("sdnKpi").innerHTML=`<div class="kpi"><span>SDN</span><b>${esc(curSdn())}</b></div>
    <div class="kpi"><span>Villages Planned</span><b>${t.v}</b></div><div class="kpi"><span>Target</span><b>${t.target}</b></div>
    <div class="kpi"><span>Registration</span><b>${reg}</b></div><div class="kpi"><span>Vendor Selection</span><b>${t.vendor}</b></div>
@@ -315,6 +322,12 @@ async function saveAll(){
   }catch(e){setMsg("Network error – data not saved. Try again.",true)}
   $("saveBtn").disabled=false;
 }
+function setSt(t){$("stTxt").textContent=t}
+async function refreshNow(){
+  if(isAdm()){await loadAll();return}
+  if(S.dirty&&!confirm("Unsaved changes will be lost. Refresh?"))return;
+  S.dirty=false;await loadSdn();
+}
 function setMsg(t,err,ok){const m=$("saveMsg");m.textContent=t;m.className="msg"+(err?" err":ok?" ok":"")}
 window.addEventListener("beforeunload",e=>{if(S.dirty){e.preventDefault();e.returnValue=""}});
 
@@ -330,6 +343,7 @@ async function loadAll(keep){
   $("fSdn").innerHTML='<option value="">All SDN</option>'+SDNS.map(s=>`<option>${s}</option>`).join("");
   $("fDate").innerHTML='<option value="">All Dates</option>'+DATES.map(d=>`<option value="${d}">${dmy(d)}</option>`).join("");
   $("fSdn").value=fs;$("fDate").value=fd;
+  setSt(`Division · ${S.rows.filter(r=>r.village).length} villages planned`);
   renderSum();renderStatus();renderAll();if(!$("sdnView").classList.contains("hide"))renderSdn();
 }
 function dTab(b){
