@@ -94,6 +94,11 @@ tr.tot td{background:var(--g);font-weight:bold}
 
   <!-- SDN VIEW -->
   <div id="sdnView" class="hide">
+    <div id="admBar" class="card hide" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <b style="color:var(--b)">Edit SDN:</b>
+      <select id="admSdn" style="width:auto" onchange="renderSdn()"></select>
+      <span style="font-size:12px;color:var(--mut)">Division can edit entries of any SDN. Select SDN and date, change details and press Save.</span>
+    </div>
     <div class="kpis" id="sdnKpi"></div>
     <div class="card" style="margin-top:12px">
       <div style="font-size:12px;color:var(--mut);margin-bottom:6px">Select Date (✓ = village entered)</div>
@@ -109,6 +114,7 @@ tr.tot td{background:var(--g);font-weight:bold}
       <button class="tab on" data-t="sum" onclick="dTab(this)">Summary</button>
       <button class="tab" data-t="status" onclick="dTab(this)">Entry Status</button>
       <button class="tab" data-t="all" onclick="dTab(this)">All Entries</button>
+      <button class="tab" data-t="edit" onclick="dTab(this)">✏ Edit Entries</button>
       <button onclick="downloadXlsx()">⬇ Download Excel</button>
       <button class="sec" onclick="loadAll()">⟳ Refresh</button>
     </div>
@@ -153,7 +159,10 @@ const COLS=[["date","Date"],["sdn","SDN"],["village","Village / Location"],["ven
 ["target","Target Registration (Minimum)"],["reg_upto","Registration Done (Nos.) Up to 2.18 KW"],["reg_above","Registration Done (Nos.) Above 2.18 KW"],
 ["vendor","Vendor Selection Done (Nos.)"],["install","No. of Installation (Nos.)"]];
 
-let S={login:null,pin:null,role:null,rows:[],date:DATES[0],dirty:false};
+let S={login:null,pin:null,role:null,rows:[],date:DATES[0],dirty:false,changed:new Set(),deleted:new Set()};
+const isAdm=()=>S.role==="ADMIN";
+const curSdn=()=>isAdm()?$("admSdn").value:S.login;
+const myRows=()=>S.rows.filter(r=>r.sdn===curSdn());
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const n=v=>{const x=parseInt(v,10);return isNaN(x)?0:x};
@@ -176,7 +185,10 @@ function demoApi(b){
   if(b.action==="list") return {ok:true,rows:role==="ADMIN"?all:all.filter(r=>r.sdn===b.login)};
   if(b.action==="save"){
     const at=new Date().toLocaleString("en-IN");
-    all=all.filter(r=>r.sdn!==b.login).concat(b.rows.map(r=>({...r,updated_at:at,updated_by:b.login})));
+    const up=b.rows.map(r=>({...r,updated_at:at,updated_by:b.login}));
+    if(role==="ADMIN"){const ids=new Set(up.map(r=>r.id)),del=new Set((b.deleted||[]).filter(id=>!/_1$/.test(id)));
+      all=all.filter(r=>!ids.has(r.id)&&!del.has(r.id)).concat(up);}
+    else all=all.filter(r=>r.sdn!==b.login).concat(up);
     all.sort((a,c)=>(a.date+SDNS.indexOf(a.sdn)+a.id).localeCompare(c.date+SDNS.indexOf(c.sdn)+c.id));
     localStorage.setItem("solarDemo",JSON.stringify(all));
     return {ok:true,saved:b.rows.length,at};
@@ -202,7 +214,7 @@ function logout(){
 }
 async function start(){
   $("loginView").classList.add("hide");$("logoutBtn").classList.remove("hide");
-  if(S.role==="ADMIN"){$("divView").classList.remove("hide");await loadAll();}
+  if(S.role==="ADMIN"){$("divView").appendChild($("sdnView"));$("divView").classList.remove("hide");await loadAll();}
   else{$("sdnView").classList.remove("hide");$("saveBar").classList.remove("hide");await loadSdn();}
 }
 
@@ -218,18 +230,18 @@ async function loadSdn(){
 }
 function renderSdn(){
   // KPIs
-  const t=S.rows.reduce((a,r)=>{NUM.forEach(f=>a[f]+=n(r[f]));if(r.village)a.v++;return a},{target:0,reg_upto:0,reg_above:0,vendor:0,install:0,v:0});
+  const t=myRows().reduce((a,r)=>{NUM.forEach(f=>a[f]+=n(r[f]));if(r.village)a.v++;return a},{target:0,reg_upto:0,reg_above:0,vendor:0,install:0,v:0});
   const reg=t.reg_upto+t.reg_above;
-  $("sdnKpi").innerHTML=`<div class="kpi"><span>SDN</span><b>${esc(S.login)}</b></div>
+  $("sdnKpi").innerHTML=`<div class="kpi"><span>SDN</span><b>${esc(curSdn())}</b></div>
    <div class="kpi"><span>Villages Planned</span><b>${t.v}</b></div><div class="kpi"><span>Target</span><b>${t.target}</b></div>
    <div class="kpi"><span>Registration</span><b>${reg}</b></div><div class="kpi"><span>Vendor Selection</span><b>${t.vendor}</b></div>
    <div class="kpi"><span>Installation</span><b>${t.install}</b></div><div class="kpi"><span>Achievement</span><b>${t.target?(reg*100/t.target).toFixed(1)+"%":"-"}</b></div>`;
   // date chips
   $("dateChips").innerHTML=DATES.map(d=>{
-    const done=S.rows.some(r=>r.date===d&&r.village);
+    const done=myRows().some(r=>r.date===d&&r.village);
     return `<button class="chip ${d===S.date?"on":""} ${isSun(d)?"sun":""} ${done?"done":""}" onclick="pickDate('${d}')">${dmy(d).slice(0,5)}<br><small>${dayName(d).slice(0,3)}</small></button>`}).join("");
   // camps
-  const list=S.rows.filter(r=>r.date===S.date);
+  const list=myRows().filter(r=>r.date===S.date);
   $("camps").innerHTML=`<p style="margin:4px 0 8px;font-weight:bold;color:var(--b)">${dmy(S.date)} – ${dayName(S.date)}${isSun(S.date)?" (Sunday – fill only if camp organised)":""}</p>`+
     list.map((r,i)=>campHtml(r,i)).join("");
   list.forEach(r=>calc(r.id));
@@ -267,7 +279,7 @@ function edit(el){
   const r=S.rows.find(x=>x.id===el.dataset.id),f=el.dataset.f;
   let v=el.value;
   if(NUM.includes(f)||f.endsWith("mobile")){v=v.replace(/\D/g,"");el.value=v}
-  r[f]=v;S.dirty=true;setMsg("Unsaved changes");calc(r.id);
+  r[f]=v;S.dirty=true;S.changed.add(r.id);setMsg("Unsaved changes");calc(r.id);
 }
 function calc(id){
   const r=S.rows.find(x=>x.id===id);const reg=n(r.reg_upto)+n(r.reg_above);
@@ -282,20 +294,26 @@ function calc(id){
 }
 function pickDate(d){S.date=d;renderSdn();window.scrollTo(0,0)}
 function addCamp(){
-  const k=Math.max(...S.rows.filter(r=>r.date===S.date).map(r=>n(r.id.split("_").pop())),0)+1;
-  S.rows.push(blank(S.date,S.login,k));S.dirty=true;setMsg("Unsaved changes");renderSdn();
+  const k=Math.max(...myRows().filter(r=>r.date===S.date).map(r=>n(r.id.split("_").pop())),0)+1;
+  const nr=blank(S.date,curSdn(),k);S.rows.push(nr);S.changed.add(nr.id);S.dirty=true;setMsg("Unsaved changes");renderSdn();
   setTimeout(()=>window.scrollTo(0,document.body.scrollHeight),50);
 }
-function delCamp(id){if(!confirm("Remove this camp?"))return;S.rows=S.rows.filter(r=>r.id!==id);S.dirty=true;setMsg("Unsaved changes");renderSdn()}
+function delCamp(id){if(!confirm("Remove this camp?"))return;S.rows=S.rows.filter(r=>r.id!==id);S.changed.delete(id);S.deleted.add(id);S.dirty=true;setMsg("Unsaved changes");renderSdn()}
 async function saveAll(){
-  const bad=S.rows.filter(r=>["je_mobile","a1_mobile","a2_mobile","a3_mobile"].some(f=>r[f]&&r[f].length!==10));
-  if(bad.length){setMsg(`Mobile No. must be 10 digits (check ${dmy(bad[0].date)}).`,true);pickDate(bad[0].date);return}
-  const bad2=S.rows.find(r=>n(r.vendor)>n(r.reg_upto)+n(r.reg_above)||n(r.install)>n(r.vendor));
-  if(bad2){setMsg(`Check figures on ${dmy(bad2.date)}: Vendor/Installation is more than previous stage.`,true);pickDate(bad2.date);return}
+  const chk=isAdm()?S.rows.filter(r=>S.changed.has(r.id)):S.rows;
+  const goTo=r=>{if(isAdm())$("admSdn").value=r.sdn;pickDate(r.date)};
+  const bad=chk.filter(r=>["je_mobile","a1_mobile","a2_mobile","a3_mobile"].some(f=>r[f]&&r[f].length!==10));
+  if(bad.length){setMsg(`Mobile No. must be 10 digits (check ${bad[0].sdn} ${dmy(bad[0].date)}).`,true);goTo(bad[0]);return}
+  const bad2=chk.find(r=>n(r.vendor)>n(r.reg_upto)+n(r.reg_above)||n(r.install)>n(r.vendor));
+  if(bad2){setMsg(`Check figures on ${bad2.sdn} ${dmy(bad2.date)}: Vendor/Installation is more than previous stage.`,true);goTo(bad2);return}
+  if(isAdm()&&!S.changed.size&&!S.deleted.size){setMsg("No changes to save.");return}
   $("saveBtn").disabled=true;setMsg("Saving...");
   try{
-    const r=await api({action:"save",login:S.login,pin:S.pin,rows:S.rows});
-    if(r.ok){S.dirty=false;setMsg(`Saved successfully (${r.at})`,false,true);renderSdn()}else setMsg(r.error,true);
+    const body={action:"save",login:S.login,pin:S.pin,rows:isAdm()?S.rows.filter(r=>S.changed.has(r.id)):S.rows};
+    if(isAdm())body.deleted=[...S.deleted];
+    const r=await api(body);
+    if(r.ok){S.dirty=false;S.changed.clear();S.deleted.clear();setMsg(`Saved successfully (${r.at})`,false,true);
+      if(isAdm())await loadAll(true);else renderSdn()}else setMsg(r.error,true);
   }catch(e){setMsg("Network error – data not saved. Try again.",true)}
   $("saveBtn").disabled=false;
 }
@@ -303,16 +321,28 @@ function setMsg(t,err,ok){const m=$("saveMsg");m.textContent=t;m.className="msg"
 window.addEventListener("beforeunload",e=>{if(S.dirty){e.preventDefault();e.returnValue=""}});
 
 /* ---------- DIVISION ---------- */
-async function loadAll(){
-  $("d_sum").innerHTML="<p>Loading...</p>";
+async function loadAll(keep){
+  if(!keep&&S.dirty&&!confirm("Unsaved changes will be lost. Refresh?"))return;
+  if(!keep)$("d_sum").innerHTML="<p>Loading...</p>";
   const r=await api({action:"list",login:S.login,pin:S.pin});
   if(!r.ok){$("d_sum").innerHTML=`<p class="no">${esc(r.error)}</p>`;return}
-  S.rows=r.rows;
+  S.rows=r.rows;S.dirty=false;S.changed.clear();S.deleted.clear();
+  if(!$("admSdn").options.length)$("admSdn").innerHTML=SDNS.map(s=>`<option>${s}</option>`).join("");
+  const fs=$("fSdn").value,fd=$("fDate").value;
   $("fSdn").innerHTML='<option value="">All SDN</option>'+SDNS.map(s=>`<option>${s}</option>`).join("");
   $("fDate").innerHTML='<option value="">All Dates</option>'+DATES.map(d=>`<option value="${d}">${dmy(d)}</option>`).join("");
-  renderSum();renderStatus();renderAll();
+  $("fSdn").value=fs;$("fDate").value=fd;
+  renderSum();renderStatus();renderAll();if(!$("sdnView").classList.contains("hide"))renderSdn();
 }
-function dTab(b){document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===b));["sum","status","all"].forEach(t=>$("d_"+t).classList.toggle("hide",t!==b.dataset.t))}
+function dTab(b){
+  const t=b.dataset.t,ed=t==="edit";
+  if(!ed&&S.dirty&&!confirm("Unsaved changes will be lost. Continue?"))return;
+  if(!ed&&S.dirty){loadAll(true)}
+  document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===b));
+  ["sum","status","all"].forEach(x=>$("d_"+x).classList.toggle("hide",x!==t));
+  $("sdnView").classList.toggle("hide",!ed);$("admBar").classList.toggle("hide",!ed);$("saveBar").classList.toggle("hide",!ed);
+  if(ed){setMsg("");renderSdn()}
+}
 function agg(key,keys){
   const out=keys.map(k=>{const rs=S.rows.filter(r=>r[key]===k);const o={k,camps:rs.filter(r=>r.village).length};NUM.forEach(f=>o[f]=rs.reduce((a,r)=>a+n(r[f]),0));o.reg=o.reg_upto+o.reg_above;o.pend=o.target-o.reg;o.ach=o.target?o.reg/o.target:null;return o});
   const t={k:"TOTAL",camps:0};NUM.forEach(f=>t[f]=0);out.forEach(o=>{t.camps+=o.camps;NUM.forEach(f=>t[f]+=o[f])});t.reg=t.reg_upto+t.reg_above;t.pend=t.target-t.reg;t.ach=t.target?t.reg/t.target:null;

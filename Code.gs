@@ -79,7 +79,7 @@ function doPost(ev) {
     if (!user) return out({ ok: false, error: 'Invalid login or PIN' });
     if (req.action === 'login') return out({ ok: true, role: user.role, login: user.login });
     if (req.action === 'list') return out({ ok: true, rows: readRows(user.role === 'ADMIN' ? null : user.login) });
-    if (req.action === 'save') return out(saveRows(user, req.rows || []));
+    if (req.action === 'save') return out(saveRows(user, req.rows || [], req.deleted || []));
     return out({ ok: false, error: 'Unknown action' });
   } catch (err) {
     return out({ ok: false, error: String(err) });
@@ -107,26 +107,30 @@ function readRows(sdn) {
   return res;
 }
 
-/* SDN saves its full set of rows: existing IDs are updated, new IDs appended, removed extra rows deleted */
-function saveRows(user, rows) {
+/* SDN saves its full set of rows: existing IDs are updated, new IDs appended, removed extra rows deleted.
+   Division (ADMIN) saves only the rows it changed (+ list of deleted IDs); other rows stay as they are. */
+function saveRows(user, rows, deleted) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Entries');
     var v = sh.getDataRange().getDisplayValues();
-    var sdn = user.role === 'ADMIN' ? null : user.login;
+    var admin = user.role === 'ADMIN';
+    var sdn = admin ? null : user.login;
     var now = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MM-yyyy HH:mm');
-    var byId = {};
+    var byId = {}, del = {};
     rows.forEach(function (r) {
       if (sdn && r.sdn !== sdn) throw new Error('You can save only ' + sdn + ' SDN rows');
+      if (SDNS.indexOf(r.sdn) < 0) throw new Error('Invalid SDN: ' + r.sdn);
       byId[r.id] = r;
     });
+    (deleted || []).forEach(function (id) { if (!/_1$/.test(id)) del[id] = true; });
     var keep = [v[0]];
     for (var i = 1; i < v.length; i++) {
       var id = v[i][0], rowSdn = v[i][2];
-      var mine = !sdn || rowSdn === sdn;
-      if (mine && byId[id]) { keep.push(toArr(byId[id], now, user.login)); delete byId[id]; }
-      else if (mine && !byId[id] && !/_1$/.test(id) && rows.length) { /* extra row removed by SDN */ }
+      if (byId[id] && (admin || rowSdn === sdn)) { keep.push(toArr(byId[id], now, user.login)); delete byId[id]; }
+      else if (admin && del[id]) { /* extra row removed by Division */ }
+      else if (!admin && rowSdn === sdn && !/_1$/.test(id) && rows.length) { /* extra row removed by SDN */ }
       else keep.push(v[i]);
     }
     Object.keys(byId).forEach(function (k) { keep.push(toArr(byId[k], now, user.login)); });
