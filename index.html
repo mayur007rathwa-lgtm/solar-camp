@@ -88,13 +88,13 @@ tr.tot td{background:var(--g);font-weight:bold}
   <div id="loginView" class="card login">
     <h3 style="margin-top:0;color:var(--b)">Login</h3>
     <label>Login As</label>
-    <select id="lgUser">
+    <select id="lgUser" onchange="pinToggle()">
       <option>Bodeli</option><option>Pavijetpur</option><option>Tejgadh</option>
       <option>Chhotaudepur</option><option>Kawant</option><option>Naswadi</option>
       <option value="Division">Division (Admin)</option>
     </select>
-    <label>PIN</label>
-    <input id="lgPin" type="password" inputmode="numeric" maxlength="6" placeholder="Enter PIN">
+    <div id="pinBox" class="hide"><label>PIN (Division only)</label>
+    <input id="lgPin" type="password" inputmode="numeric" maxlength="6" placeholder="Enter PIN"></div>
     <div style="margin-top:12px"><button style="width:100%" onclick="doLogin()">Login</button></div>
     <p id="lgMsg" class="msg err"></p>
   </div>
@@ -152,6 +152,8 @@ tr.tot td{background:var(--g);font-weight:bold}
 const API_URL = "https://script.google.com/macros/s/AKfycby_PW_DOSFcEFfuldcRqJNkZ7drmcDVdv3DDWLTss7B2_9gOddFGcyRTO4f64m5LWk0/exec";
 /* ========================================== */
 
+const SDN_PIN="1234"; /* common PIN of all SDN logins in Users sheet – SDN login without PIN */
+function pinToggle(){$("pinBox").classList.toggle("hide",$("lgUser").value!=="Division")}
 const SDNS=["Bodeli","Pavijetpur","Tejgadh","Chhotaudepur","Kawant","Naswadi"];
 const DESIG=["Dy. Engineer","Jr. Engineer","Line Inspector","Line Man","Asst. Line Man","Vidyut Sahayak","Jr. Assistant","Meter Reader","Helper","Outsourced Staff"];
 const NUM=["target","reg_upto","reg_above","vendor","install"];
@@ -204,7 +206,7 @@ function blank(d,s,k){const o={id:`${d}_${s}_${k}`,date:d,sdn:s,target:k===1?"25
 
 /* ---------- login ---------- */
 async function doLogin(){
-  const login=$("lgUser").value,pin=$("lgPin").value.trim();
+  const login=$("lgUser").value,pin=login==="Division"?$("lgPin").value.trim():SDN_PIN;
   $("lgMsg").textContent="Checking...";
   try{
     const r=await api({action:"login",login,pin});
@@ -403,7 +405,7 @@ function downloadXlsx(){
 /* ---------- init ---------- */
 if(!API_URL)$("demoNote").classList.remove("hide");
 $("lgPin").addEventListener("keydown",e=>{if(e.key==="Enter")doLogin()});
-(()=>{const s=JSON.parse(sessionStorage.getItem("solarLogin")||"null");if(s){$("lgUser").value=s.login;$("lgPin").value=s.pin;doLogin()}})();
+(()=>{const s=JSON.parse(sessionStorage.getItem("solarLogin")||"null");if(s){$("lgUser").value=s.login;$("lgPin").value=s.pin;pinToggle();doLogin()}})();
 </script>
 </body>
 </html>
