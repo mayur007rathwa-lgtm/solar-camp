@@ -128,15 +128,17 @@ function saveRows(user, rows, deleted) {
       byId[r.id] = r;
     });
     (deleted || []).forEach(function (id) { if (!/_1$/.test(id)) del[id] = true; });
+    var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
     var keep = [v[0]];
     for (var i = 1; i < v.length; i++) {
       var id = v[i][0], rowSdn = v[i][2];
+      if (!admin && rowSdn === sdn && v[i][1] < today) { keep.push(v[i]); delete byId[id]; continue; } /* date over: locked for SDN */
       if (byId[id] && (admin || rowSdn === sdn)) { keep.push(toArr(byId[id], now, user.login)); delete byId[id]; }
       else if (admin && del[id]) { /* extra row removed by Division */ }
       else if (!admin && rowSdn === sdn && !/_1$/.test(id) && rows.length) { /* extra row removed by SDN */ }
       else keep.push(v[i]);
     }
-    Object.keys(byId).forEach(function (k) { keep.push(toArr(byId[k], now, user.login)); });
+    Object.keys(byId).forEach(function (k) { if (admin || byId[k].date >= today) keep.push(toArr(byId[k], now, user.login)); });
     keep = [keep[0]].concat(keep.slice(1).sort(function (a, b) {
       return (a[1] + SDNS.indexOf(a[2]) + a[0]).localeCompare(b[1] + SDNS.indexOf(b[2]) + b[0]);
     }));
@@ -216,6 +218,8 @@ function uploadPhoto(user, req) {
   if (SDNS.indexOf(req.sdn) < 0) return { ok: false, error: 'Invalid SDN' };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date || '')) return { ok: false, error: 'Invalid date' };
   if (!req.data) return { ok: false, error: 'No photo data' };
+  if (!admin && req.date < Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd'))
+    return { ok: false, error: 'Date is over – photos cannot be added. Contact Division office.' };
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -244,6 +248,8 @@ function deletePhoto(user, pid) {
   for (var i = 1; i < v.length; i++) {
     if (v[i][0] !== pid) continue;
     if (user.role !== 'ADMIN' && v[i][3] !== user.login) return { ok: false, error: 'Not allowed' };
+    if (user.role !== 'ADMIN' && v[i][2] < Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd'))
+      return { ok: false, error: 'Date is over – photo cannot be deleted. Contact Division office.' };
     try { DriveApp.getFileById(v[i][5]).setTrashed(true); } catch (e) {}
     sh.deleteRow(i + 1);
     return { ok: true };

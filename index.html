@@ -19,6 +19,7 @@ header p{margin:2px 0 0;font-size:12px;opacity:.85}
 label{display:block;font-size:12px;color:var(--mut);margin:6px 0 3px}
 input,select,textarea{width:100%;padding:8px;border:1px solid var(--bd);border-radius:6px;font:inherit;background:#fffdf4}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--b2);border-color:var(--b2)}
+input:disabled,select:disabled{background:#f0f2f5;color:#444;opacity:1}
 input.bad{border-color:var(--r);background:#fff0f0}
 button{font:inherit;border:0;border-radius:6px;padding:9px 14px;cursor:pointer;background:var(--b2);color:#fff}
 button.sec{background:#fff;color:var(--b);border:1px solid var(--b2)}
@@ -36,6 +37,8 @@ button:disabled{opacity:.5}
 .chip.on{background:var(--b);color:#fff;border-color:var(--b)}
 .chip.sun{background:#e6e6e6}
 .chip.done::after{content:" ✓";color:#2e7d32;font-weight:bold}
+.chip.lock{opacity:.75}
+.lockbar{background:#fdecea;border:1px solid #f5c2c0;color:#8a1c1c;border-radius:6px;padding:8px 10px;font-size:13px;margin-bottom:10px}
 .chip.on.done::after{color:#b9f6ca}
 .sec-t{font-weight:bold;color:var(--b);margin:12px 0 2px;font-size:13px;border-bottom:1px solid #e3e8ef;padding-bottom:3px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 10px}
@@ -120,7 +123,7 @@ tr.tot td{background:var(--g);font-weight:bold}
       <div class="chips" id="dateChips"></div>
     </div>
     <div id="camps"></div>
-    <button class="sec" style="width:100%;margin-bottom:70px" onclick="addCamp()">+ Add Another Village for this Date</button>
+    <button id="addCampBtn" class="sec" style="width:100%;margin-bottom:70px" onclick="addCamp()">+ Add Another Village for this Date</button>
   </div>
 
   <!-- DIVISION VIEW -->
@@ -202,6 +205,15 @@ const MAX_PH=0; /* 0 = no limit on photos per camp */
 const phLeft=id=>MAX_PH?MAX_PH-camPh(id).length:Infinity;
 let S={photos:[],serverIds:new Set(),login:null,pin:null,role:null,rows:[],date:DATES[0],dirty:false,changed:new Set(),deleted:new Set()};
 const isAdm=()=>S.role==="ADMIN";
+const todayIST=()=>new Date().toLocaleDateString("en-CA",{timeZone:"Asia/Kolkata"});
+/* SDN cannot edit a date once it is over; Division can always edit */
+const isLocked=d=>!isAdm()&&d<todayIST();
+function applyLock(){
+  const lk=isLocked(S.date);
+  document.querySelectorAll("#camps input,#camps select").forEach(e=>e.disabled=lk);
+  document.querySelectorAll("#camps .pdel,#camps .danger,#camps .pbtn").forEach(e=>e.classList.toggle("hide",lk));
+  $("addCampBtn").classList.toggle("hide",lk);
+}
 const curSdn=()=>isAdm()?$("admSdn").value:S.login;
 const myRows=()=>S.rows.filter(r=>r.sdn===curSdn());
 const $=id=>document.getElementById(id);
@@ -274,7 +286,7 @@ async function loadSdn(){
   if(!r.ok){setMsg(r.error,true);return}
   S.rows=r.rows;S.serverIds=new Set(r.rows.map(x=>x.id));if(!S.rows.length)DATES.forEach(d=>S.rows.push(blank(d,S.login,1)));
   await loadPhotos();
-  const today=new Date().toISOString().slice(0,10);
+  const today=todayIST();
   if(!S.loaded&&DATES.includes(today))S.date=today;S.loaded=true;
   setMsg("");renderSdn();
 }
@@ -290,12 +302,15 @@ function renderSdn(){
   // date chips
   $("dateChips").innerHTML=DATES.map(d=>{
     const done=myRows().some(r=>r.date===d&&r.village);
-    return `<button class="chip ${d===S.date?"on":""} ${isSun(d)?"sun":""} ${done?"done":""}" onclick="pickDate('${d}')">${dmy(d).slice(0,5)}<br><small>${dayName(d).slice(0,3)}</small></button>`}).join("");
+    const lk=isLocked(d);
+    return `<button class="chip ${d===S.date?"on":""} ${isSun(d)?"sun":""} ${done?"done":""} ${lk?"lock":""}" onclick="pickDate('${d}')">${dmy(d).slice(0,5)}<br><small>${lk?"🔒 ":""}${dayName(d).slice(0,3)}</small></button>`}).join("");
   // camps
   const list=myRows().filter(r=>r.date===S.date);
   $("camps").innerHTML=`<p style="margin:4px 0 8px;font-weight:bold;color:var(--b)">${dmy(S.date)} – ${dayName(S.date)}${isSun(S.date)?" (Sunday – fill only if camp organised)":""}</p>`+
+    (isLocked(S.date)?`<div class="lockbar">🔒 Date is over – entries of ${dmy(S.date)} are locked and cannot be edited. For any correction, please contact Division office.</div>`:"")+
     list.map((r,i)=>campHtml(r,i)).join("");
   list.forEach(r=>calc(r.id));
+  applyLock();
 }
 function inp(r,f,ph,type){
   const t=type||"text",im=NUM.includes(f)||f.endsWith("mobile")?'inputmode="numeric"':"";
@@ -331,6 +346,7 @@ function campHtml(r,i){
 }
 function edit(el){
   const r=S.rows.find(x=>x.id===el.dataset.id),f=el.dataset.f;
+  if(isLocked(r.date)){renderSdn();return}
   let v=el.value;
   if(NUM.includes(f)||f.endsWith("mobile")){v=v.replace(/\D/g,"");el.value=v}
   r[f]=v;S.dirty=true;S.changed.add(r.id);setMsg("Unsaved changes");calc(r.id);
@@ -417,7 +433,7 @@ function photoHtml(id){
     <label class="pbtn">🖼 From Gallery<input type="file" accept="image/*" multiple hidden onchange="addPhotos(this,'${id}')"></label>
   </div>`:`<div class="pbtn off">Maximum ${MAX_PH} photos uploaded</div>`}`;
 }
-function rePh(id){const e=$("p_"+id);if(e)e.innerHTML=photoHtml(id)}
+function rePh(id){const e=$("p_"+id);if(e)e.innerHTML=photoHtml(id);applyLock()}
 function phMsg(id,t,err,ok){const m=$("pm_"+id);if(m){m.textContent=t;m.className="msg"+(err?" err":ok?" ok":"")}}
 function compress(file){
   return new Promise((res,rej)=>{
@@ -431,6 +447,7 @@ function compress(file){
 async function addPhotos(inp,id){
   const files=[...inp.files];inp.value="";
   const r=S.rows.find(x=>x.id===id);if(!r||!files.length)return;
+  if(isLocked(r.date)){phMsg(id,"Date is over – photos cannot be added.",true);return}
   if(!S.serverIds.has(id)){phMsg(id,"Please Save this camp first, then upload photos.",true);return}
   if(!r.village){phMsg(id,"Enter Village name and Save first, then upload photos.",true);return}
   const left=phLeft(id);
