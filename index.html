@@ -129,6 +129,7 @@ tr.tot td{background:var(--g);font-weight:bold}
       <button class="tab on" data-t="sum" onclick="dTab(this)">Summary</button>
       <button class="tab" data-t="status" onclick="dTab(this)">Entry Status</button>
       <button class="tab" data-t="all" onclick="dTab(this)">All Entries</button>
+      <button class="tab" data-t="rep" onclick="dTab(this)">📝 PMSG Report</button>
       <button class="tab" data-t="photos" onclick="dTab(this)">📷 Photos</button>
       <button class="tab" data-t="edit" onclick="dTab(this)">✏ Edit Entries</button>
       <button onclick="downloadXlsx()">⬇ Download Excel</button>
@@ -141,6 +142,20 @@ tr.tot td{background:var(--g);font-weight:bold}
         <select id="fDate" onchange="renderAll()"><option value="">All Dates</option></select>
       </div>
       <div class="tbl" id="allTbl"></div>
+    </div>
+    <div id="d_rep" class="hide">
+      <div class="card">
+        <div class="filters">
+          <select id="rDate" onchange="renderRep()"></select>
+          <select id="rType" onchange="renderRep()"><option value="day">Date-wise</option><option value="cum">Cumulative (from 18-11-2026)</option></select>
+        </div>
+        <textarea id="repTxt" rows="22" style="font-family:Arial,sans-serif;font-size:13px;background:#fff" readonly></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <button onclick="copyRep()">📋 Copy Report</button>
+          <button style="background:#25D366" onclick="waRep()">Share on WhatsApp</button>
+          <span id="repMsg" class="msg ok" style="align-self:center"></span>
+        </div>
+      </div>
     </div>
     <div id="d_photos" class="hide">
       <div class="filters">
@@ -364,6 +379,29 @@ async function refreshNow(){
 function setMsg(t,err,ok){const m=$("saveMsg");m.textContent=t;m.className="msg"+(err?" err":ok?" ok":"")}
 window.addEventListener("beforeunload",e=>{if(S.dirty){e.preventDefault();e.returnValue=""}});
 
+/* ---------- PMSG WhatsApp report ---------- */
+const REP_ORDER=[["Pavijetpur","Jetpur Pavi"],["Naswadi","Naswadi"],["Kawant","Kawant"],["Chhotaudepur","Chhotaudepur"],["Bodeli","Bodeli"],["Tejgadh","Tejgadh"]];
+const p2=x=>String(x).padStart(2,"0");
+function renderRep(){
+  if(!$("repTxt")||!$("rDate").value)return;
+  const d=$("rDate").value,cum=$("rType").value==="cum";
+  const pick=r=>cum?r.date<=d:r.date===d;
+  const sum=sdn=>{const o={inst:0,ven:0,up:0,ab:0};S.rows.filter(r=>(!sdn||r.sdn===sdn)&&pick(r)).forEach(r=>{o.inst+=n(r.install);o.ven+=n(r.vendor);o.up+=n(r.reg_upto);o.ab+=n(r.reg_above)});return o};
+  const blk=o=>`(1) Nos of RTS Commissioned: ${p2(o.inst)}\n(2) Nos of Vendors selected: ${p2(o.ven)}\n(3) Nos of new application rec'd upto 2.18 KW: ${p2(o.up)}`+(o.ab?`\nAbove 2.18 KW – ${p2(o.ab)} nos.`:"");
+  const t=sum(null),tot=t.up+t.ab;
+  const dd=d.split("-").reverse().join("/");
+  let txt=`PMSG Report – Bodeli Division\nDate: ${cum?"18/11/2026 to "+dd+" (Cumulative)":dd}\n`;
+  REP_ORDER.forEach(([k,lab])=>{txt+=`👉🏻${lab} SDN\n${blk(sum(k))}\n`});
+  txt+=`👉🏻 Total – Bodeli Division\n${blk(t)}\n(Total application – ${tot}: Selected – ${t.ven}, Pending – ${tot-t.ven})`;
+  $("repTxt").value=txt;$("repMsg").textContent="";
+}
+async function copyRep(){
+  const t=$("repTxt").value;
+  try{await navigator.clipboard.writeText(t)}catch(e){$("repTxt").select();document.execCommand("copy")}
+  $("repMsg").textContent="Report copied.";
+}
+function waRep(){window.open("https://wa.me/?text="+encodeURIComponent($("repTxt").value),"_blank")}
+
 /* ---------- PHOTOS ---------- */
 async function loadPhotos(){
   try{const r=await api({action:"photos",login:S.login,pin:S.pin});S.photos=r.ok?r.photos:[]}catch(e){S.photos=[]}
@@ -439,6 +477,9 @@ async function loadAll(keep){
   if(!$("pSdn").options.length||$("pSdn").options.length<2){$("pSdn").innerHTML='<option value="">All SDN</option>'+SDNS.map(x=>`<option>${x}</option>`).join("");
     $("pDate").innerHTML='<option value="">All Dates</option>'+DATES.map(d=>`<option value="${d}">${dmy(d)}</option>`).join("");}
   renderPhotos();
+  if(!$("rDate").options.length){$("rDate").innerHTML=DATES.map(d=>`<option value="${d}">${dmy(d)}</option>`).join("");
+    const td=new Date().toISOString().slice(0,10);$("rDate").value=DATES.includes(td)?td:DATES[0];}
+  renderRep();
   if(!$("admSdn").options.length)$("admSdn").innerHTML=SDNS.map(s=>`<option>${s}</option>`).join("");
   const fs=$("fSdn").value,fd=$("fDate").value;
   $("fSdn").innerHTML='<option value="">All SDN</option>'+SDNS.map(s=>`<option>${s}</option>`).join("");
@@ -452,7 +493,7 @@ function dTab(b){
   if(!ed&&S.dirty&&!confirm("Unsaved changes will be lost. Continue?"))return;
   if(!ed&&S.dirty){loadAll(true)}
   document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===b));
-  ["sum","status","all","photos"].forEach(x=>$("d_"+x).classList.toggle("hide",x!==t));
+  ["sum","status","all","rep","photos"].forEach(x=>$("d_"+x).classList.toggle("hide",x!==t));
   $("sdnView").classList.toggle("hide",!ed);$("admBar").classList.toggle("hide",!ed);$("saveBar").classList.toggle("hide",!ed);
   if(ed){setMsg("");renderSdn()}
 }
