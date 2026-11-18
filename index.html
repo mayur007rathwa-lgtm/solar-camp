@@ -183,7 +183,8 @@ const COLS=[["date","Date"],["sdn","SDN"],["village","Village / Location"],["ven
 ["target","Target Registration (Minimum)"],["reg_upto","Registration Done (Nos.) Up to 2.18 KW"],["reg_above","Registration Done (Nos.) Above 2.18 KW"],
 ["vendor","Vendor Selection Done (Nos.)"],["install","No. of Installation (Nos.)"]];
 
-const MAX_PH=10;
+const MAX_PH=0; /* 0 = no limit on photos per camp */
+const phLeft=id=>MAX_PH?MAX_PH-camPh(id).length:Infinity;
 let S={photos:[],serverIds:new Set(),login:null,pin:null,role:null,rows:[],date:DATES[0],dirty:false,changed:new Set(),deleted:new Set()};
 const isAdm=()=>S.role==="ADMIN";
 const curSdn=()=>isAdm()?$("admSdn").value:S.login;
@@ -211,7 +212,7 @@ function demoApi(b){
   let ph=JSON.parse(localStorage.getItem("solarDemoPh")||"[]");
   if(b.action==="photos") return {ok:true,photos:role==="ADMIN"?ph:ph.filter(p=>p.sdn===b.login)};
   if(b.action==="upload"){
-    if(ph.filter(p=>p.entry_id===b.entryId).length>=MAX_PH) return {ok:false,error:`Maximum ${MAX_PH} photos allowed for one camp`};
+    if(MAX_PH&&ph.filter(p=>p.entry_id===b.entryId).length>=MAX_PH) return {ok:false,error:`Maximum ${MAX_PH} photos allowed for one camp`};
     const p={pid:"P"+Date.now()+Math.random().toString().slice(2,6),entry_id:b.entryId,date:b.date,sdn:b.sdn,village:b.village,file_id:"",thumb:"data:image/jpeg;base64,"+b.data,view:"",at:new Date().toLocaleString("en-IN"),by:b.login};
     p.view=p.thumb;ph.push(p);localStorage.setItem("solarDemoPh",JSON.stringify(ph));return {ok:true,photo:p};
   }
@@ -370,8 +371,8 @@ async function loadPhotos(){
 const thumb=p=>p.thumb||`https://drive.google.com/thumbnail?id=${p.file_id}&sz=w400`;
 const camPh=id=>S.photos.filter(p=>p.entry_id===id);
 function photoHtml(id){
-  const ps=camPh(id),left=MAX_PH-ps.length;
-  return `<div style="font-size:12px;color:var(--mut)">${ps.length} / ${MAX_PH} photos</div>
+  const ps=camPh(id),left=phLeft(id);
+  return `<div style="font-size:12px;color:var(--mut)">${ps.length}${MAX_PH?" / "+MAX_PH:""} photo(s) uploaded</div>
   <div class="pgrid">${ps.map(p=>`<div class="ph"><a href="${esc(p.view)}" target="_blank" rel="noopener"><img loading="lazy" src="${esc(thumb(p))}" alt="photo"></a><button class="pdel" title="Delete" onclick="delPhoto('${p.pid}','${id}')">✕</button></div>`).join("")}</div>
   ${left?`<div style="display:flex;gap:8px;flex-wrap:wrap">
     <label class="pbtn">📷 Take Photo<input type="file" accept="image/*" capture="environment" hidden onchange="addPhotos(this,'${id}')"></label>
@@ -394,7 +395,7 @@ async function addPhotos(inp,id){
   const r=S.rows.find(x=>x.id===id);if(!r||!files.length)return;
   if(!S.serverIds.has(id)){phMsg(id,"Please Save this camp first, then upload photos.",true);return}
   if(!r.village){phMsg(id,"Enter Village name and Save first, then upload photos.",true);return}
-  const left=MAX_PH-camPh(id).length;
+  const left=phLeft(id);
   if(left<=0){phMsg(id,`Maximum ${MAX_PH} photos allowed.`,true);return}
   const list=files.slice(0,left);let ok=0;
   for(let i=0;i<list.length;i++){

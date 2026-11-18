@@ -163,7 +163,7 @@ function out(o) {
 }
 
 /* ---------- PHOTOS (Google Drive) ---------- */
-var MAX_PHOTOS = 10;
+var MAX_PHOTOS = 0; /* 0 = no limit on photos per camp */
 var PH_HEAD = ['Photo ID', 'Entry ID', 'Date', 'SDN', 'Village', 'File ID', 'File Link', 'Uploaded At', 'Uploaded By'];
 
 /* Run this once from the editor after pasting the new code, to give Drive permission */
@@ -220,7 +220,7 @@ function uploadPhoto(user, req) {
   lock.waitLock(20000);
   try {
     var have = listPhotos(req.sdn).filter(function (p) { return p.entry_id === req.entryId; }).length;
-    if (have >= MAX_PHOTOS) return { ok: false, error: 'Maximum ' + MAX_PHOTOS + ' photos allowed for one camp' };
+    if (MAX_PHOTOS && have >= MAX_PHOTOS) return { ok: false, error: 'Maximum ' + MAX_PHOTOS + ' photos allowed for one camp' };
     var dmy = req.date.split('-').reverse().join('-');
     var folder = subFolder(subFolder(rootFolder(), dmy), req.sdn);
     var now = new Date();
