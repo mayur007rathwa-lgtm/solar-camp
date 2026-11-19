@@ -129,12 +129,13 @@ tr.tot td{background:var(--g);font-weight:bold}
   <!-- DIVISION VIEW -->
   <div id="divView" class="hide">
     <div class="tabs">
+      <button class="tab sdnOnly hide" id="sdnEntryTab" data-t="edit" onclick="dTab(this)">✏ Camp Entry</button>
       <button class="tab on" data-t="sum" onclick="dTab(this)">Summary</button>
-      <button class="tab" data-t="status" onclick="dTab(this)">Entry Status</button>
+      <button class="tab admOnly" data-t="status" onclick="dTab(this)">Entry Status</button>
       <button class="tab" data-t="all" onclick="dTab(this)">All Entries</button>
-      <button class="tab" data-t="rep" onclick="dTab(this)">📝 PMSG Report</button>
+      <button class="tab admOnly" data-t="rep" onclick="dTab(this)">📝 PMSG Report</button>
       <button class="tab" data-t="photos" onclick="dTab(this)">📷 Photos</button>
-      <button class="tab" data-t="edit" onclick="dTab(this)">✏ Edit Entries</button>
+      <button class="tab admOnly" data-t="edit" onclick="dTab(this)">✏ Edit Entries</button>
       <button onclick="downloadXlsx()">⬇ Download Excel</button>
     </div>
     <div id="d_sum"></div>
@@ -276,7 +277,12 @@ function logout(){
 async function start(){
   $("loginView").classList.add("hide");$("stBar").classList.remove("hide");
   if(S.role==="ADMIN"){$("divView").appendChild($("sdnView"));$("divView").classList.remove("hide");await loadAll();}
-  else{$("sdnView").classList.remove("hide");$("saveBar").classList.remove("hide");await loadSdn();}
+  else{ /* SDN: same tab bar as Division, but only own SDN data (Camp Entry, Summary, All Entries, Photos, Excel) */
+    $("divView").appendChild($("sdnView"));$("divView").classList.remove("hide");
+    document.querySelectorAll(".admOnly").forEach(x=>x.classList.add("hide"));
+    document.querySelectorAll(".sdnOnly").forEach(x=>x.classList.remove("hide"));
+    $("fSdn").classList.add("hide");$("pSdn").classList.add("hide");
+    dTab($("sdnEntryTab"));await loadSdn();}
 }
 
 /* ---------- SDN ---------- */
@@ -288,7 +294,14 @@ async function loadSdn(){
   await loadPhotos();
   const today=todayIST();
   if(!S.loaded&&DATES.includes(today))S.date=today;S.loaded=true;
-  setMsg("");renderSdn();
+  setMsg("");initFilters();renderSdn();renderSdnTabs();
+}
+/* SDN read-only tabs (data = own SDN rows only, as returned by server) */
+function renderSdnTabs(){renderSum();renderAll();renderPhotos()}
+function initFilters(){
+  const opt=(id,first,list,lab)=>{const e=$(id),v=e.value;e.innerHTML=`<option value="">${first}</option>`+list.map(x=>`<option value="${x}">${lab(x)}</option>`).join("");e.value=v};
+  opt("fSdn","All SDN",SDNS,x=>x);opt("fDate","All Dates",DATES,dmy);
+  opt("pSdn","All SDN",SDNS,x=>x);opt("pDate","All Dates",DATES,dmy);
 }
 function renderSdn(){
   // KPIs
@@ -382,7 +395,7 @@ async function saveAll(){
     if(isAdm())body.deleted=[...S.deleted];
     const r=await api(body);
     if(r.ok){body.rows.forEach(x=>S.serverIds.add(x.id));S.dirty=false;S.changed.clear();S.deleted.clear();setMsg(`Saved successfully (${r.at})`,false,true);
-      if(isAdm())await loadAll(true);else renderSdn()}else setMsg(r.error,true);
+      if(isAdm())await loadAll(true);else{renderSdn();renderSdnTabs()}}else setMsg(r.error,true);
   }catch(e){setMsg("Network error – data not saved. Try again.",true)}
   $("saveBtn").disabled=false;
 }
@@ -462,13 +475,13 @@ async function addPhotos(inp,id){
     }catch(e){phMsg(id,`Photo ${i+1}: upload failed (${e.message||"network"}).`,true);return}
   }
   phMsg(id,`${ok} photo uploaded successfully.`+(files.length>list.length?` Only ${MAX_PH} photos allowed – ${files.length-list.length} skipped.`:""),false,true);
-  if(isAdm()){renderStatus();renderPhotos()}
+  if(isAdm())renderStatus();renderPhotos();
 }
 async function delPhoto(pid,id){
   if(!confirm("Delete this photo?"))return;
   phMsg(id,"Deleting...");
   try{const r=await api({action:"delphoto",login:S.login,pin:S.pin,pid});
-    if(r.ok){S.photos=S.photos.filter(p=>p.pid!==pid);rePh(id);phMsg(id,"Photo deleted.",false,true);if(isAdm()){renderStatus();renderPhotos()}}
+    if(r.ok){S.photos=S.photos.filter(p=>p.pid!==pid);rePh(id);phMsg(id,"Photo deleted.",false,true);if(isAdm())renderStatus();renderPhotos()}
     else phMsg(id,r.error,true)}catch(e){phMsg(id,"Network error.",true)}
 }
 function renderPhotos(){
@@ -491,28 +504,24 @@ async function loadAll(keep){
   if(!r.ok){$("d_sum").innerHTML=`<p class="no">${esc(r.error)}</p>`;return}
   S.rows=r.rows;S.serverIds=new Set(r.rows.map(x=>x.id));S.dirty=false;S.changed.clear();S.deleted.clear();
   await loadPhotos();
-  if(!$("pSdn").options.length||$("pSdn").options.length<2){$("pSdn").innerHTML='<option value="">All SDN</option>'+SDNS.map(x=>`<option>${x}</option>`).join("");
-    $("pDate").innerHTML='<option value="">All Dates</option>'+DATES.map(d=>`<option value="${d}">${dmy(d)}</option>`).join("");}
+  initFilters();
   renderPhotos();
   if(!$("rDate").options.length){$("rDate").innerHTML=DATES.map(d=>`<option value="${d}">${dmy(d)}</option>`).join("");
     const td=new Date().toISOString().slice(0,10);$("rDate").value=DATES.includes(td)?td:DATES[0];}
   renderRep();
   if(!$("admSdn").options.length)$("admSdn").innerHTML=SDNS.map(s=>`<option>${s}</option>`).join("");
-  const fs=$("fSdn").value,fd=$("fDate").value;
-  $("fSdn").innerHTML='<option value="">All SDN</option>'+SDNS.map(s=>`<option>${s}</option>`).join("");
-  $("fDate").innerHTML='<option value="">All Dates</option>'+DATES.map(d=>`<option value="${d}">${dmy(d)}</option>`).join("");
-  $("fSdn").value=fs;$("fDate").value=fd;
   setSt(`Division · ${S.rows.filter(r=>r.village).length} villages planned`);
   renderSum();renderStatus();renderAll();if(!$("sdnView").classList.contains("hide"))renderSdn();
 }
 function dTab(b){
   const t=b.dataset.t,ed=t==="edit";
+  if(!isAdm()&&!ed&&S.dirty){setMsg("Please Save your changes first, then open other tabs.",true);return}
   if(!ed&&S.dirty&&!confirm("Unsaved changes will be lost. Continue?"))return;
   if(!ed&&S.dirty){loadAll(true)}
   document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===b));
   ["sum","status","all","rep","photos"].forEach(x=>$("d_"+x).classList.toggle("hide",x!==t));
-  $("sdnView").classList.toggle("hide",!ed);$("admBar").classList.toggle("hide",!ed);$("saveBar").classList.toggle("hide",!ed);
-  if(ed){setMsg("");renderSdn()}
+  $("sdnView").classList.toggle("hide",!ed);$("admBar").classList.toggle("hide",!ed||!isAdm());$("saveBar").classList.toggle("hide",!ed);
+  if(ed&&isAdm()){setMsg("");renderSdn()}
 }
 function agg(key,keys){
   const out=keys.map(k=>{const rs=S.rows.filter(r=>r[key]===k);const o={k,camps:rs.filter(r=>r.village).length};NUM.forEach(f=>o[f]=rs.reduce((a,r)=>a+n(r[f]),0));o.reg=o.reg_upto+o.reg_above;o.pend=o.target-o.reg;o.ach=o.target?o.reg/o.target:null;return o});
@@ -527,9 +536,10 @@ function sumTable(title,first,a,lab){
   <tr class="tot"><td colspan="2">TOTAL</td>${sumVals(a.tot).map(v=>`<td>${v}</td>`).join("")}</tr></table></div></div>`;
 }
 function renderSum(){
-  const a=agg("sdn",SDNS),t=a.tot;
+  const a=agg("sdn",SDNS),t=a.tot,dw=agg("date",DATES),lab=k=>`${dmy(k)} (${dayName(k).slice(0,3)})`;
   $("d_sum").innerHTML=`<div class="kpis" style="margin-bottom:12px"><div class="kpi"><span>Camps Planned</span><b>${t.camps}</b></div><div class="kpi"><span>Target</span><b>${t.target}</b></div><div class="kpi"><span>Registration</span><b>${t.reg}</b></div><div class="kpi"><span>Vendor Selection</span><b>${t.vendor}</b></div><div class="kpi"><span>Installation</span><b>${t.install}</b></div><div class="kpi"><span>Achievement</span><b>${t.ach==null?"-":(t.ach*100).toFixed(1)+"%"}</b></div></div>`+
-  sumTable("SDN-wise Summary","SDN",a,k=>k)+sumTable("Date-wise Summary","Date",agg("date",DATES),k=>`${dmy(k)} (${dayName(k).slice(0,3)})`);
+  (isAdm()?sumTable("SDN-wise Summary","SDN",a,k=>k)+sumTable("Date-wise Summary","Date",dw,lab)
+          :sumTable(`Date-wise Summary – ${esc(S.login)} SDN`,"Date",dw,lab));
 }
 function renderStatus(){
   const last={};S.rows.forEach(r=>{if(r.updated_at)last[r.sdn]=r.updated_at});
@@ -546,19 +556,22 @@ function renderAll(){
 }
 function downloadXlsx(){
   if(typeof XLSX==="undefined"){alert("Excel library not loaded. Check internet.");return}
+  if(!isAdm()&&S.dirty){setMsg("Please Save your changes first, then download Excel.",true);return}
+  const who=isAdm()?"Bodeli":S.login;
   const H=["Sr. No.","Date","Day",...COLS.slice(1).map(c=>c[1]),"Registration Pending (Nos.)","Achievement %","Remarks","Photos (Nos.)","Last Updated"];
-  const data=[["MADHYA GUJARAT VIJ COMPANY LIMITED – BODELI DIVISION"],["PM Surya Ghar: Muft Bijli Yojana – Solar Registration & Vendor Selection Camp Planning (18-11-2026 to 30-11-2026)"],[],H];
+  const data=[["MADHYA GUJARAT VIJ COMPANY LIMITED – BODELI DIVISION"+(isAdm()?"":" – "+S.login.toUpperCase()+" SDN")],["PM Surya Ghar: Muft Bijli Yojana – Solar Registration & Vendor Selection Camp Planning (18-11-2026 to 30-11-2026)"],[],H];
   S.rows.forEach((r,i)=>{const reg=n(r.reg_upto)+n(r.reg_above);
     data.push([i+1,dmy(r.date),dayName(r.date),...COLS.slice(1).map(([f])=>NUM.includes(f)?(r[f]===""?"":n(r[f])):r[f]),r.target===""?"":n(r.target)-reg,n(r.target)?+(reg/n(r.target)).toFixed(3):"",r.remarks,S.photos.filter(p=>p.entry_id===r.id).length,r.updated_at])});
   const ws=XLSX.utils.aoa_to_sheet(data);ws["!cols"]=H.map((h,i)=>({wch:i<3?11:Math.min(Math.max(h.length,12),24)}));
   ws["!merges"]=[{s:{r:0,c:0},e:{r:0,c:H.length-1}},{s:{r:1,c:0},e:{r:1,c:H.length-1}}];
-  const S1=[["SDN-wise Summary"],["Sr. No.","SDN",...SUMH]],a=agg("sdn",SDNS);
-  a.rows.forEach((o,i)=>S1.push([i+1,o.k,...sumVals(o)]));S1.push(["TOTAL","",...sumVals(a.tot)]);
-  S1.push([],["Date-wise Summary"],["Sr. No.","Date",...SUMH]);const b=agg("date",DATES);
+  const S1=[];
+  if(isAdm()){const a=agg("sdn",SDNS);S1.push(["SDN-wise Summary"],["Sr. No.","SDN",...SUMH]);
+    a.rows.forEach((o,i)=>S1.push([i+1,o.k,...sumVals(o)]));S1.push(["TOTAL","",...sumVals(a.tot)]);S1.push([]);}
+  S1.push([isAdm()?"Date-wise Summary":`Date-wise Summary – ${S.login} SDN`],["Sr. No.","Date",...SUMH]);const b=agg("date",DATES);
   b.rows.forEach((o,i)=>S1.push([i+1,dmy(o.k),...sumVals(o)]));S1.push(["TOTAL","",...sumVals(b.tot)]);
   const ws2=XLSX.utils.aoa_to_sheet(S1);ws2["!cols"]=[{wch:7},{wch:14},...SUMH.map(()=>({wch:14}))];
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,"Planning");XLSX.utils.book_append_sheet(wb,ws2,"Summary");
-  XLSX.writeFile(wb,`Solar_Camp_Planning_Bodeli_${new Date().toLocaleDateString("en-GB").replace(/\//g,"-")}.xlsx`);
+  XLSX.writeFile(wb,`Solar_Camp_Planning_${who}_${new Date().toLocaleDateString("en-GB").replace(/\//g,"-")}.xlsx`);
 }
 
 /* ---------- init ---------- */
